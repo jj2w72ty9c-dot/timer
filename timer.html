@@ -1,0 +1,295 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Unterrichts-Timer</title>
+<script src="https://appsforoffice.microsoft.com/lib/1/hosted/office.js"></script>
+<style>
+  :root {
+    --bg: #ffffff;
+    --text: #1d2433;
+    --muted: #8a93a6;
+    --track: #e7eaf0;
+    --green: #2bb673;
+    --orange: #f5a623;
+    --red: #e5484d;
+    --btn: #f1f3f7;
+    --btn-hover: #e4e8ef;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { height: 100%; }
+  body {
+    font-family: -apple-system, "Segoe UI", Helvetica, Arial, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 3vmin;
+    overflow: hidden;
+    user-select: none;
+    -webkit-user-select: none;
+  }
+  .ring-wrap {
+    position: relative;
+    width: 62vmin;
+    height: 62vmin;
+  }
+  svg { width: 100%; height: 100%; transform: rotate(-90deg); }
+  .track { fill: none; stroke: var(--track); stroke-width: 7; }
+  .progress {
+    fill: none; stroke: var(--green); stroke-width: 7; stroke-linecap: round;
+    transition: stroke-dashoffset 0.25s linear, stroke 0.4s;
+  }
+  .center {
+    position: absolute; inset: 0;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+  }
+  .time {
+    font-size: 15vmin;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+    letter-spacing: -0.02em;
+    line-height: 1;
+  }
+  .adjust {
+    display: flex; gap: 6vmin; margin-top: 1.5vmin;
+  }
+  .adjust .col { display: flex; flex-direction: column; align-items: center; gap: 0.8vmin; }
+  .adjust .lbl { font-size: 2.6vmin; color: var(--muted); }
+  .adjust .pm { display: flex; gap: 1vmin; }
+  .small {
+    width: 6vmin; height: 6vmin; min-width: 24px; min-height: 24px;
+    border-radius: 50%; border: none; background: var(--btn);
+    font-size: 3.5vmin; color: var(--text); cursor: pointer;
+  }
+  .small:hover { background: var(--btn-hover); }
+  .presets { display: flex; gap: 1.5vmin; flex-wrap: wrap; justify-content: center; }
+  .preset {
+    border: none; background: var(--btn); border-radius: 999px;
+    padding: 1.2vmin 2.6vmin; font-size: 3vmin; cursor: pointer; color: var(--text);
+  }
+  .preset:hover { background: var(--btn-hover); }
+  .controls { display: flex; gap: 2vmin; align-items: center; }
+  .main {
+    border: none; border-radius: 999px; cursor: pointer;
+    padding: 1.8vmin 6vmin; font-size: 4vmin; font-weight: 600;
+    background: var(--green); color: white; min-width: 26vmin;
+  }
+  .main.pause { background: var(--orange); }
+  .icon {
+    border: none; background: var(--btn); border-radius: 50%; cursor: pointer;
+    width: 8vmin; height: 8vmin; min-width: 30px; min-height: 30px;
+    font-size: 4vmin; color: var(--text);
+  }
+  .icon:hover { background: var(--btn-hover); }
+  .hidden { visibility: hidden; }
+  .gone { display: none !important; }
+  body.done { animation: flash 0.6s ease-in-out 6; }
+  body.done .time { color: var(--red); }
+  @keyframes flash { 50% { background: #ffe3e3; } }
+</style>
+</head>
+<body>
+  <div class="ring-wrap">
+    <svg viewBox="0 0 100 100">
+      <circle class="track" cx="50" cy="50" r="45"></circle>
+      <circle class="progress" id="progress" cx="50" cy="50" r="45"></circle>
+    </svg>
+    <div class="center">
+      <div class="time" id="time">05:00</div>
+      <div class="adjust" id="adjust">
+        <div class="col">
+          <div class="pm">
+            <button class="small" data-step="-60">−</button>
+            <button class="small" data-step="60">+</button>
+          </div>
+          <span class="lbl">Minuten</span>
+        </div>
+        <div class="col">
+          <div class="pm">
+            <button class="small" data-step="-10">−</button>
+            <button class="small" data-step="10">+</button>
+          </div>
+          <span class="lbl">Sekunden</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="presets" id="presets">
+    <button class="preset" data-min="1">1 min</button>
+    <button class="preset" data-min="2">2 min</button>
+    <button class="preset" data-min="3">3 min</button>
+    <button class="preset" data-min="5">5 min</button>
+    <button class="preset" data-min="10">10 min</button>
+    <button class="preset" data-min="15">15 min</button>
+    <button class="preset" data-min="20">20 min</button>
+  </div>
+
+  <div class="controls">
+    <button class="icon" id="reset" title="Zurücksetzen">↺</button>
+    <button class="main" id="startBtn">Start</button>
+    <button class="icon" id="sound" title="Ton an/aus">🔔</button>
+  </div>
+
+<script>
+  const R = 45, CIRC = 2 * Math.PI * R;
+  const el = id => document.getElementById(id);
+  const progress = el('progress');
+  progress.style.strokeDasharray = CIRC;
+
+  let total = 300;        // eingestellte Dauer in Sekunden
+  let remaining = 300;    // Restzeit in Sekunden
+  let running = false;
+  let endAt = 0;
+  let tick = null;
+  let soundOn = true;
+  let audioCtx = null;
+  let officeReady = false;
+
+  function fmt(s) {
+    s = Math.max(0, Math.ceil(s));
+    const m = Math.floor(s / 60), sec = s % 60;
+    return String(m).padStart(2, '0') + ':' + String(sec).padStart(2, '0');
+  }
+
+  function render() {
+    el('time').textContent = fmt(remaining);
+    const frac = total > 0 ? remaining / total : 0;
+    progress.style.strokeDashoffset = CIRC * (1 - frac);
+    let color = 'var(--green)';
+    if (frac <= 0.1 || remaining <= 10) color = 'var(--red)';
+    else if (frac <= 0.25) color = 'var(--orange)';
+    progress.style.stroke = color;
+
+    const atStart = !running && remaining === total;
+    el('adjust').classList.toggle('hidden', !atStart);
+    el('presets').classList.toggle('hidden', running);
+    const btn = el('startBtn');
+    btn.textContent = running ? 'Pause' : (remaining < total && remaining > 0 ? 'Weiter' : 'Start');
+    btn.classList.toggle('pause', running);
+    el('sound').textContent = soundOn ? '🔔' : '🔕';
+  }
+
+  function setTotal(sec) {
+    if (running) return;
+    total = Math.min(Math.max(sec, 5), 99 * 60 + 59);
+    remaining = total;
+    document.body.classList.remove('done');
+    save();
+    render();
+  }
+
+  function start() {
+    if (remaining <= 0) remaining = total;
+    document.body.classList.remove('done');
+    initAudio();
+    running = true;
+    endAt = Date.now() + remaining * 1000;
+    tick = setInterval(update, 200);
+    render();
+  }
+
+  function pause() {
+    running = false;
+    clearInterval(tick);
+    remaining = Math.max(0, (endAt - Date.now()) / 1000);
+    render();
+  }
+
+  function reset() {
+    running = false;
+    clearInterval(tick);
+    remaining = total;
+    document.body.classList.remove('done');
+    render();
+  }
+
+  function update() {
+    remaining = Math.max(0, (endAt - Date.now()) / 1000);
+    if (remaining <= 0) {
+      running = false;
+      clearInterval(tick);
+      remaining = 0;
+      finish();
+    }
+    render();
+  }
+
+  function finish() {
+    document.body.classList.remove('done');
+    void document.body.offsetWidth; // Animation neu starten
+    document.body.classList.add('done');
+    el('time').textContent = '00:00';
+    if (soundOn) playAlarm();
+  }
+
+  // ---- Ton ----
+  function initAudio() {
+    try {
+      if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      if (audioCtx.state === 'suspended') audioCtx.resume();
+    } catch (e) { audioCtx = null; }
+  }
+  function playAlarm() {
+    if (!audioCtx) return;
+    const t0 = audioCtx.currentTime;
+    for (let i = 0; i < 1; i++) {
+      const osc = audioCtx.createOscillator();
+      const gain = audioCtx.createGain();
+      osc.type = 'sine';
+      osc.frequency.value = 880;
+      const t = t0 + i * 0.45;
+      gain.gain.setValueAtTime(0, t);
+      gain.gain.linearRampToValueAtTime(0.4, t + 0.02);
+      gain.gain.linearRampToValueAtTime(0, t + 0.3);
+      osc.connect(gain).connect(audioCtx.destination);
+      osc.start(t);
+      osc.stop(t + 0.32);
+    }
+  }
+
+  // ---- Einstellung in der Präsentation speichern ----
+  function save() {
+    if (!officeReady) return;
+    try {
+      const s = Office.context.document.settings;
+      s.set('timerSeconds', total);
+      s.set('timerSound', soundOn);
+      s.saveAsync();
+    } catch (e) {}
+  }
+  function load() {
+    try {
+      const s = Office.context.document.settings;
+      const t = s.get('timerSeconds');
+      const snd = s.get('timerSound');
+      if (typeof t === 'number') { total = t; remaining = t; }
+      if (typeof snd === 'boolean') soundOn = snd;
+    } catch (e) {}
+    render();
+  }
+
+  // ---- Bedienung ----
+  el('startBtn').addEventListener('click', () => running ? pause() : start());
+  el('reset').addEventListener('click', reset);
+  el('sound').addEventListener('click', () => { soundOn = !soundOn; save(); render(); });
+  document.querySelectorAll('[data-step]').forEach(b =>
+    b.addEventListener('click', () => setTotal(total + Number(b.dataset.step))));
+  document.querySelectorAll('[data-min]').forEach(b =>
+    b.addEventListener('click', () => setTotal(Number(b.dataset.min) * 60)));
+  document.addEventListener('keydown', e => {
+    if (e.code === 'Space') { e.preventDefault(); running ? pause() : start(); }
+    if (e.key === 'r' || e.key === 'R') reset();
+  });
+
+  render();
+  if (window.Office && Office.onReady) {
+    Office.onReady(() => { officeReady = !!(Office.context && Office.context.document); if (officeReady) load(); });
+  }
+</script>
+</body>
+</html>
